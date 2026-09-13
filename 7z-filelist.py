@@ -17,9 +17,9 @@ def format_size(size_bytes):
     """把字节大小自动换算成 KB, MB, GB"""
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size_bytes < 1024.0:
-            return f"{size_bytes:3.1f} {unit}"
+            return f"{size_bytes:3.1f}{unit}"
         size_bytes /= 1024.0
-    return f"{size_bytes:.1f} PB"
+    return f"{size_bytes:.1f}PB"
 
 
 def format_time(dt):
@@ -27,6 +27,61 @@ def format_time(dt):
     if dt is None:
         return "-"
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+class Node:
+    __slots__ = ("name", "is_dir", "size", "mtime", "children")
+
+    def __init__(self, name, is_dir):
+        self.name = name
+        self.is_dir = is_dir
+        self.size = 0
+        self.mtime = None
+        self.children = {}  # name -> Node，插入顺序保留，展示时再排序
+
+
+def build_tree(file_info_list):
+    """把 py7zr 返回的扁平文件列表，组装成一棵目录树"""
+    root = Node("", True)
+
+    for item in file_info_list:
+        parts = item.filename.replace("\\", "/").strip("/").split("/")
+        node = root
+        for i, part in enumerate(parts):
+            is_last_part = i == len(parts) - 1
+            if part not in node.children:
+                # 中间路径可能没有显式目录条目，先按目录占位，后面若有显式条目会被补全
+                node.children[part] = Node(part, True if not is_last_part else item.is_directory)
+            node = node.children[part]
+        # 到达条目本身，写入真实信息
+        node.is_dir = item.is_directory
+        node.size = 0 if item.is_directory else item.uncompressed
+        node.mtime = item.creationtime
+
+    return root
+
+
+def compute_dir_sizes(node):
+    """目录本身在压缩包里通常不带大小，这里递归汇总子项大小，方便查看占用"""
+    if not node.is_dir:
+        return node.size
+    total = 0
+    for child in node.children.values():
+        total += compute_dir_sizes(child)
+    node.size = total
+    return total
+
+
+def render_tree(node, prefix, lines):
+    children = sorted(node.children.values(), key=lambda n: n.name.lower())
+    for i, child in enumerate(children):
+        is_last = i == len(children) - 1
+        connector = "└── " if is_last else "├── "
+        name_display = child.name + ("/" if child.is_dir else "")
+        info = f"[{format_size(child.size)} {format_time(child.mtime)}]"
+        lines.append(f"{prefix}{connector}{name_display} {info}")
+        extension = "    " if is_last else "│   "
+        render_tree(child, prefix + extension, lines)
 
 
 def export_7z_list(archive_path):
@@ -47,6 +102,15 @@ def export_7z_list(archive_path):
             total_files = 0
             total_dirs = 0
             total_uncompressed_size = 0
+            for item in file_info_list:
+                if item.is_directory:
+                    total_dirs += 1
+                else:
+                    total_files += 1
+                    total_uncompressed_size += item.uncompressed
+
+            root = build_tree(file_info_list)
+            compute_dir_sizes(root)
 
             lines = []
             lines.append("=" * 110)
@@ -55,27 +119,17 @@ def export_7z_list(archive_path):
                 f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
             lines.append("=" * 110)
+
+            # 根节点：用压缩包本身的大小/修改时间展示
+            archive_mtime = datetime.fromtimestamp(os.path.getmtime(archive_path))
             lines.append(
-                f"{'文件大小':<12} | {'类型':<6} | {'修改时间':<19} | 相对路径与名称"
+                f"{os.path.basename(archive_path)}/ "
+                f"[{format_size(total_uncompressed_size)} {format_time(archive_mtime)}]"
             )
-            lines.append("-" * 110)
 
-            for item in file_info_list:
-                path = item.filename
-                mtime_str = format_time(item.creationtime)
-                if item.is_directory:
-                    total_dirs += 1
-                    lines.append(
-                        f"{'-':<12} | {'[目录]':<6} | {mtime_str:<19} | {path}/"
-                    )
-                else:
-                    total_files += 1
-                    size_str = format_size(item.uncompressed)
-                    total_uncompressed_size += item.uncompressed
-                    lines.append(
-                        f"{size_str:<12} | {'[文件]':<6} | {mtime_str:<19} | {path}"
-                    )
+            render_tree(root, "", lines)
 
+            lines.append("")
             lines.append("=" * 110)
             lines.append(
                 f"统计汇总: 共 {total_files} 个文件，{total_dirs} 个文件夹"
