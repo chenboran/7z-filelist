@@ -22,6 +22,13 @@ def format_size(size_bytes):
     return f"{size_bytes:.1f} PB"
 
 
+def format_time(dt):
+    """把 datetime 格式化为字符串，缺失时用占位符"""
+    if dt is None:
+        return "-"
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def export_7z_list(archive_path):
     if not os.path.exists(archive_path):
         print(f"❌ 文件不存在: {archive_path}")
@@ -42,36 +49,41 @@ def export_7z_list(archive_path):
             total_uncompressed_size = 0
 
             lines = []
-            lines.append("=" * 90)
+            lines.append("=" * 110)
             lines.append(f"压缩包名称: {os.path.basename(archive_path)}")
             lines.append(
                 f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            lines.append("=" * 90)
+            lines.append("=" * 110)
             lines.append(
-                f"{'文件大小':<12} | {'类型':<6} | 相对路径与名称"
+                f"{'文件大小':<12} | {'类型':<6} | {'修改时间':<19} | 相对路径与名称"
             )
-            lines.append("-" * 90)
+            lines.append("-" * 110)
 
             for item in file_info_list:
                 path = item.filename
+                mtime_str = format_time(item.creationtime)
                 if item.is_directory:
                     total_dirs += 1
-                    lines.append(f"{'-':<12} | {'[目录]':<6} | {path}/")
+                    lines.append(
+                        f"{'-':<12} | {'[目录]':<6} | {mtime_str:<19} | {path}/"
+                    )
                 else:
                     total_files += 1
                     size_str = format_size(item.uncompressed)
                     total_uncompressed_size += item.uncompressed
-                    lines.append(f"{size_str:<12} | {'[文件]':<6} | {path}")
+                    lines.append(
+                        f"{size_str:<12} | {'[文件]':<6} | {mtime_str:<19} | {path}"
+                    )
 
-            lines.append("=" * 90)
+            lines.append("=" * 110)
             lines.append(
                 f"统计汇总: 共 {total_files} 个文件，{total_dirs} 个文件夹"
             )
             lines.append(
                 f"解压缩后总大小: {format_size(total_uncompressed_size)}"
             )
-            lines.append("=" * 90)
+            lines.append("=" * 110)
 
         # 写入 TXT，强制 UTF-8 编码，彻底杜绝中文乱码
         with open(output_txt, "w", encoding="utf-8") as f:
