@@ -1,0 +1,35 @@
+name: 打包为 Windows exe
+
+on:
+  workflow_dispatch:   # 手动点击触发
+  push:
+    branches: [ main ]
+    paths:
+      - '7z-filelist.py'
+
+jobs:
+  build:
+    runs-on: windows-latest   # 使用 GitHub 提供的云端 Windows 环境
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install py7zr pyinstaller
+
+      - name: 打包为单文件 exe
+        run: |
+          pyinstaller -F --name "7z目录清单工具" 7z-filelist.py
+
+      - name: 上传打包结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: 7z目录清单工具-exe
+          path: dist/7z目录清单工具.exe
